@@ -2,8 +2,11 @@
 import os
 import json
 import time
+import re
+import html
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Any, Tuple
+from datetime import datetime, timezone
 import requests
 import feedparser
 
@@ -24,38 +27,77 @@ def save_state(state: Dict[str, List[str]]) -> None:
         json.dump(state, f, indent=2, ensure_ascii=False)
 
 def get_entry_id(entry) -> str:
-    # Prefer GUID/id if present; fall back to link+title
     entry_id = getattr(entry, "id", "") or getattr(entry, "guid", "") or ""
     if not entry_id:
         entry_id = f"{getattr(entry, 'link', '')}::{getattr(entry, 'title', '')}"
     return entry_id
 
-def post_to_discord(webhook_url: str, title: str, url: str, description: str = "") -> None:
-    # Use an embed for nicer formatting
+def coerce_dt(entry) -> datetime:
+    """Return a timezone-aware UTC datetime for the entry (fallback to now)."""
+    for attr in ("published_parsed", "updated_parsed", "created_parsed"):
+        t = getattr(entry, attr, None)
+        if t:
+            return datetime(*t[:6], tzinfo=timezone.utc)
+    return datetime.now(timezone.utc)
+
+def clean_text(s: str, limit: int = 800) -> str:
+    if not s:
+        return ""
+    # strip HTML tags
+    s = re.sub(r"<[^>]+>", " ", s)
+    # decode entities, collapse whitespace
+    s = html.unescape(s)
+    s = re.sub(r"\s+", " ", s).strip()
+    if len(s) > limit:
+        s = s[: limit - 1].rstrip() + "…"
+    return s
+
+def post_header_for_date(webhook_url: str, d: datetime, feed_name: str):
+    date_str = d.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    content = f"**🗓️ {date_str} — {feed_name.title()} patch notes**"
+    resp = requests.post(webhook_url, json={"content": content}, timeout=20)
+    if resp.status_code >= 300:
+        raise RuntimeError(f"Discord header post failed: {resp.status_code} {resp.text}")
+
+def post_to_discord(webhook_url: str, title: str, url: str, description: str, color: int, ts: datetime, feed_name: str) -> None:
     payload = {
         "embeds": [{
             "title": title[:256] if title else "Update",
             "url": url if url else None,
-            "description": (description or "")[:3500],
+            "description": description[:3500] if description else None,
+            "color": color,
+            "timestamp": ts.astimezone(timezone.utc).isoformat(),
+            "footer": {"text": feed_name.upper()}
         }]
     }
     resp = requests.post(webhook_url, json=payload, timeout=20)
     if resp.status_code >= 300:
         raise RuntimeError(f"Discord webhook failed: {resp.status_code} {resp.text}")
 
+def should_keep(entry_title: str, pattern: str | None) -> bool:
+    if not pattern:
+        return True
+    try:
+        return re.search(pattern, entry_title or "", flags=re.I) is not None
+    except re.error:
+        return True
+
 def main():
     if not FEEDS_PATH.exists():
         raise SystemExit("feeds.json not found. Create it with your feeds configuration.")
     with open(FEEDS_PATH, "r", encoding="utf-8") as f:
-        feeds = json.load(f)
+        feeds: List[Dict[str, Any]] = json.load(f)
 
     state = load_state()
 
     for feed in feeds:
         name = feed["name"]
         feed_url = feed["feed_url"]
-        webhook_secret_name = feed["webhook_secret"]  # e.g., DISCORD_WEBHOOK_CS2
+        webhook_secret_name = feed["webhook_secret"]
         webhook_url = os.environ.get(webhook_secret_name)
+        color = int(feed.get("color", 0x5865F2))  # default blurple
+        title_filter = feed.get("title_filter_regex")
+        max_new = int(feed.get("max_new_per_run", 10))
 
         if not webhook_url:
             print(f"[WARN] Missing env for {webhook_secret_name}; skipping {name}.")
@@ -68,47 +110,38 @@ def main():
             continue
 
         seen = set(state.get(name, []))
-        new_entries = []
+        candidates: List[Tuple[str, Any, datetime]] = []
+
         for entry in parsed.entries:
+            title = getattr(entry, "title", "") or "Update"
+            if not should_keep(title, title_filter):
+                continue
             eid = get_entry_id(entry)
             if eid and eid not in seen:
-                # Try to only include patch-note-looking items if configured, but default: include all
-                new_entries.append((eid, entry))
+                dt = coerce_dt(entry)
+                candidates.append((eid, entry, dt))
 
-        # Sort by published date ascending so oldest posts first
-        def sort_key(item):
-            _eid, e = item
-            # fall back to created/updated/0
-            for attr in ("published_parsed", "updated_parsed", "created_parsed"):
-                if getattr(e, attr, None):
-                    return getattr(e, attr)
-            return time.gmtime(0)
-        new_entries.sort(key=sort_key)
+        # sort by date ascending, then cap to max_new
+        candidates.sort(key=lambda t: t[2])
+        if max_new and len(candidates) > max_new:
+            candidates = candidates[-max_new:]
 
-        for eid, entry in new_entries:
+        # group by date (UTC day)
+        posted_dates: set[str] = set()
+        for eid, entry, dt in candidates:
+            day_key = dt.astimezone(timezone.utc).strftime("%Y-%m-%d")
+            if day_key not in posted_dates:
+                try:
+                    post_header_for_date(webhook_url, dt, name)
+                except Exception as e:
+                    print(f"[WARN] Header post failed for {day_key}: {e}")
+                posted_dates.add(day_key)
+
             title = getattr(entry, "title", "Update")
             link = getattr(entry, "link", "")
-            summary = getattr(entry, "summary", "")
-            # Strip basic HTML tags if present in summary (very light)
-            try:
-                import re
-                summary = re.sub(r"<[^>]+>", "", summary)
-            except Exception:
-                pass
+            summary = getattr(entry, "summary", "") or getattr(entry, "description", "")
+            summary = clean_text(summary, limit=900)
 
             try:
-                post_to_discord(webhook_url, title, link, summary)
-                print(f"[OK] Posted: {title}")
-                # Rate-limit a bit to be polite to Discord
-                time.sleep(1.2)
-                # Update state immediately
-                state.setdefault(name, []).append(eid)
-                # Keep last 100 ids per feed
-                state[name] = state[name][-100:]
-            except Exception as e:
-                print(f"[ERR] Failed to post '{title}': {e}")
-
-    save_state(state)
-
-if __name__ == "__main__":
-    main()
+                post_to_discord(webhook_url, title, link, summary, color, dt, name)
+                print(f"[OK] Posted: {title} @ {dt.isoformat()}")
