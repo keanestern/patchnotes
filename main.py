@@ -61,11 +61,13 @@ def post_header_for_date(webhook_url: str, d: datetime, feed_name: str):
 
 def post_to_discord(webhook_url: str, title: str, url: str, description: str,
                     color: int, ts: datetime, feed_name: str,
-                    thumbnail_url: str | None = None) -> None:
+                    thumbnail_url: str | None = None,
+                    bot_name: str | None = None,
+                    avatar_url: str | None = None) -> None:
     embed = {
         "title": title[:256] if title else "Update",
-        "url": url if url else None,
-        "description": description[:3500] if description else None,
+        "url": url or None,
+        "description": (description or None)[:3500] if description else None,
         "color": color,
         "timestamp": ts.astimezone(timezone.utc).isoformat(),
         "footer": {"text": feed_name.upper()}
@@ -73,7 +75,16 @@ def post_to_discord(webhook_url: str, title: str, url: str, description: str,
     if thumbnail_url:
         embed["thumbnail"] = {"url": thumbnail_url}
 
-    payload = {"embeds": [embed]}
+    payload = {
+        "allowed_mentions": {"parse": []},
+        "embeds": [embed]
+    }
+    # ← These go on the same payload:
+    if bot_name:
+        payload["username"] = bot_name
+    if avatar_url:
+        payload["avatar_url"] = avatar_url
+
     resp = requests.post(webhook_url, json=payload, timeout=20)
     if resp.status_code >= 300:
         raise RuntimeError(f"Discord webhook failed: {resp.status_code} {resp.text}")
@@ -92,6 +103,7 @@ def main():
     with open(FEEDS_PATH, "r", encoding="utf-8") as f:
         feeds: List[Dict[str, Any]] = json.load(f)
 
+
     state = load_state()
 
     for feed in feeds:
@@ -102,6 +114,14 @@ def main():
         color = int(feed.get("color", 0x5865F2))  # default blurple
         title_filter = feed.get("title_filter_regex")
         max_new = int(feed.get("max_new_per_run", 10))
+        thumbnail_url = feed.get("thumbnail_url")
+        bot_name = feed.get("bot_name")
+        avatar_url = feed.get("avatar_url")
+
+        post_to_discord(webhook_url, title, link, summary, color, dt, name,
+                thumbnail_url=thumbnail_url,
+                bot_name=bot_name,
+                avatar_url=avatar_url)
 
         if not webhook_url:
             print(f"[WARN] Missing env for {webhook_secret_name}; skipping {name}.")
