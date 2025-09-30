@@ -59,17 +59,21 @@ def post_header_for_date(webhook_url: str, d: datetime, feed_name: str):
     if resp.status_code >= 300:
         raise RuntimeError(f"Discord header post failed: {resp.status_code} {resp.text}")
 
-def post_to_discord(webhook_url: str, title: str, url: str, description: str, color: int, ts: datetime, feed_name: str) -> None:
-    payload = {
-        "embeds": [{
-            "title": title[:256] if title else "Update",
-            "url": url if url else None,
-            "description": description[:3500] if description else None,
-            "color": color,
-            "timestamp": ts.astimezone(timezone.utc).isoformat(),
-            "footer": {"text": feed_name.upper()}
-        }]
+def post_to_discord(webhook_url: str, title: str, url: str, description: str,
+                    color: int, ts: datetime, feed_name: str,
+                    thumbnail_url: str | None = None) -> None:
+    embed = {
+        "title": title[:256] if title else "Update",
+        "url": url if url else None,
+        "description": description[:3500] if description else None,
+        "color": color,
+        "timestamp": ts.astimezone(timezone.utc).isoformat(),
+        "footer": {"text": feed_name.upper()}
     }
+    if thumbnail_url:
+        embed["thumbnail"] = {"url": thumbnail_url}
+
+    payload = {"embeds": [embed]}
     resp = requests.post(webhook_url, json=payload, timeout=20)
     if resp.status_code >= 300:
         raise RuntimeError(f"Discord webhook failed: {resp.status_code} {resp.text}")
