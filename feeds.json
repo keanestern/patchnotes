@@ -4,7 +4,8 @@
     "feed_url": "https://store.steampowered.com/feeds/news/app/730/?cc=us&l=english",
     "webhook_secret": "DISCORD_WEBHOOK_CS2",
     "color": 16753920,
-    "max_new_per_run": 5
+    "max_new_per_run": 5,
+    "thumbnail_url": "https://raw.githubusercontent.com/keanestern/patchnotes/main/assets/cs2.png"
   },
   {
     "name": "lol",
@@ -12,6 +13,7 @@
     "webhook_secret": "DISCORD_WEBHOOK_LOL",
     "color": 44677,
     "title_filter_regex": "(?i)patch\\s*\\d+|patch notes",
-    "max_new_per_run": 3
+    "max_new_per_run": 3,
+    "thumbnail_url": "https://raw.githubusercontent.com/keanestern/patchnotes/main/assets/league.png"
   }
 ]
