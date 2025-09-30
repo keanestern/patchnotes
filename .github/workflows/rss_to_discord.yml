@@ -1,12 +1,12 @@
 name: RSS to Discord
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: "*/15 * * * *"  # every 15 minutes
-  workflow_dispatch: {}
 
 permissions:
-  contents: write  # allow committing state.json updates
+  contents: write
 
 jobs:
   run:
