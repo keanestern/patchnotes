@@ -6,7 +6,7 @@
   },
   {
     "name": "lol",
-    "feed_url": "https://www.leagueoflegends.com/en-us/news/tags/patch-notes/feed/",
+    "feed_url": "http://www.surrenderat20.net/feeds/posts/default?alt=rss",
     "webhook_secret": "DISCORD_WEBHOOK_LOL"
   }
 ]
