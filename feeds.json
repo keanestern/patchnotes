@@ -1,0 +1,12 @@
+[
+  {
+    "name": "cs2",
+    "feed_url": "https://store.steampowered.com/feeds/news/app/730/?cc=us&l=english",
+    "webhook_secret": "DISCORD_WEBHOOK_CS2"
+  },
+  {
+    "name": "lol",
+    "feed_url": "https://www.leagueoflegends.com/en-us/news/tags/patch-notes/feed/",
+    "webhook_secret": "DISCORD_WEBHOOK_LOL"
+  }
+]
