@@ -1,1 +1,42 @@
+name: RSS to Discord
 
+on:
+  schedule:
+    - cron: "*/15 * * * *"  # every 15 minutes
+  workflow_dispatch: {}
+
+permissions:
+  contents: write  # allow committing state.json updates
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run fetcher
+        env:
+          DISCORD_WEBHOOK_CS2: ${{ secrets.DISCORD_WEBHOOK_CS2 }}
+          DISCORD_WEBHOOK_LOL: ${{ secrets.DISCORD_WEBHOOK_LOL }}
+        run: python main.py
+
+      - name: Commit & push state if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git add state.json
+            git commit -m "chore: update state.json [skip ci]"
+            git push
+          else
+            echo "No changes to commit."
+          fi
